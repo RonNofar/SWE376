@@ -1,5 +1,7 @@
 package com.example.ronno.takeit;
 
+import android.media.AudioFormat;
+import android.media.AudioRecord;
 import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.support.v7.app.AppCompatActivity;
@@ -11,6 +13,8 @@ import java.io.IOException;
 import java.util.Random;
 
 public class MainActivity extends AppCompatActivity {
+
+
 
     private Button recordingButton;
     private Button stopButton;
@@ -31,6 +35,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         // load here
+        voiceStoragePath = getExternalCacheDir().getAbsolutePath();
 
         recordingButton = (Button)findViewById(R.id.recording_button);
         stopButton = (Button)findViewById(R.id.stop_button);
