@@ -1,6 +1,5 @@
 package com.example.ronno.takeit;
 
-import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
@@ -11,6 +10,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.Toast;
 
 import java.io.File;
@@ -19,21 +19,23 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
+import static android.view.View.GONE;
+
 public class RecordingActivity extends AppCompatActivity {
 
-    private static final int RECORDER_BPP = 16;
-    private static final String AUDIO_RECORDER_FILE_EXT_WAV = ".wav";
-    private static final String AUDIO_RECORDER_FOLDER = "AudioRecorder";
-    private static final String AUDIO_RECORDER_TEMP_FILE = "record_temp.wav";
-    private static final int RECORDER_SAMPLERATE = 44100;
-    private static final int[] RECORDER_SAMPLERATES = new int[] {44100, 8000, 11025, 16000, 22050};
-    private static final int RECORDER_CHANNELS = AudioFormat.CHANNEL_IN_STEREO;
-    private static final int RECORDER_AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT;
+    private static final int AUDIO_BPP = 16;
+    private static final String AUDIO_FILE_EXT_WAV = ".wav";
+    private static final String AUDIO_FOLDER = "RecordedAudio";
+    private static final String AUDIO_TEMP_FILE = "audio_temp.wav";
+    private static final int AUDIO_SAMPLERATE = 44100;
+    private static final int[] AUDIO_SAMPLERATES = new int[] {44100, 8000, 11025, 16000, 22050};
+    private static final int AUDIO_CHANNELS = AudioFormat.CHANNEL_IN_STEREO;
+    private static final int AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT;
 
-    private AudioRecord recorder = null;
+    private AudioRecord audioRecorder = null;
     private int bufferSize = 0;
     private Thread recordingThread = null;
-    private boolean isRecording = false;
+    private boolean isStartRecording = false;
     private boolean isRecorded = false;
     private boolean isPlayback = false;
 
@@ -42,19 +44,54 @@ public class RecordingActivity extends AppCompatActivity {
 
     private String lastFile;
 
+    private ImageView micImage;
+    private ImageView recordingImage;
+    private ImageView playingImage;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_recording);
 
-        setButtonHandlers();
-        enableButtons(false, isRecorded);
-        bufferSize = AudioRecord.getMinBufferSize(8000,
-                AudioFormat.CHANNEL_CONFIGURATION_MONO,
-                AudioFormat.ENCODING_PCM_16BIT);
+        setAllImageReferences();
+        enableImageSwitcher(0);
+        setAllButtonHandlers();
+        enableButtonsSwitcher(false);
+        bufferSize = AudioRecord.getMinBufferSize(AUDIO_SAMPLERATE,
+                AUDIO_CHANNELS,
+                AUDIO_ENCODING);
     }
 
-    private void setButtonHandlers() {
+    private void setAllImageReferences() {
+        micImage = (ImageView)findViewById(R.id.micImage);
+        recordingImage = (ImageView)findViewById(R.id.recordingImage);
+        playingImage = (ImageView)findViewById(R.id.playingImage);
+    }
+
+    private void enableImageSwitcher(int state) { // 0 = ready, 1 = recording, 2 = playing
+        switch (state) {
+            case 0:{
+                micImage.setVisibility(View.VISIBLE);
+                recordingImage.setVisibility(GONE);
+                playingImage.setVisibility(GONE);
+                break;
+            }
+            case 1:{
+                micImage.setVisibility(GONE);
+                recordingImage.setVisibility(View.VISIBLE);
+                playingImage.setVisibility(GONE);
+                break;
+            }
+            case 2:{
+                micImage.setVisibility(GONE);
+                recordingImage.setVisibility(GONE);
+                playingImage.setVisibility(View.VISIBLE);
+                break;
+            }
+        }
+    }
+
+    private void setAllButtonHandlers() {
         ((Button)findViewById(R.id.recording_button)).setOnClickListener(btnClick);
         ((Button)findViewById(R.id.stop_button)).setOnClickListener(btnClick);
         ((Button)findViewById(R.id.play_button)).setOnClickListener(btnClick);
@@ -65,113 +102,79 @@ public class RecordingActivity extends AppCompatActivity {
         ((Button)findViewById(id)).setEnabled(isEnable);
     }
 
-    private void enableButtons(boolean isRecording, boolean isRecorded) {
-        enableButton(R.id.recording_button, !isRecording);
-        enableButton(R.id.stop_button, isRecording || isPlayback);
-        enableButton(R.id.play_button, !isRecording && isRecorded);
+    private void enableButtonsSwitcher(boolean isRecord) {
+        enableButton(R.id.recording_button, !isRecord);
+        enableButton(R.id.stop_button, isRecord || isPlayback);
+        enableButton(R.id.play_button, !isRecord && isRecorded);
     }
 
-    private String getFilename() {
+    private String getFilepath() {
         String filepath = Environment.getExternalStorageDirectory().getPath();
-        File file = new File(filepath, AUDIO_RECORDER_FOLDER);
+        File file = new File(filepath, AUDIO_FOLDER);
         if (!file.exists()) {
             file.mkdir();
         }
 
-        lastFile = file.getAbsolutePath() + "/" + System.currentTimeMillis() + AUDIO_RECORDER_FILE_EXT_WAV;
+        lastFile = file.getAbsolutePath() + "/" + System.currentTimeMillis() + AUDIO_FILE_EXT_WAV;
         return (lastFile);
     }
 
-    private String getTempFilename() {
+    private String getTemporaryFilepath() {
         String filepath = Environment.getExternalStorageDirectory().getPath();
-        File file = new File(filepath, AUDIO_RECORDER_FOLDER);
+        File file = new File(filepath, AUDIO_FOLDER);
         if (!file.exists()) {
             file.mkdir();
         }
 
-        File tempFile = new File(filepath, AUDIO_RECORDER_TEMP_FILE);
+        File tempFile = new File(filepath, AUDIO_TEMP_FILE);
         if (tempFile.exists())
             tempFile.delete();
-        return (file.getAbsolutePath() + "/" + AUDIO_RECORDER_TEMP_FILE);
+        return (file.getAbsolutePath() + "/" + AUDIO_TEMP_FILE);
     }
 
     private void startRecording() {
-        for (int rate : RECORDER_SAMPLERATES) {
+        for (int rate : AUDIO_SAMPLERATES) {
             bufferSize = AudioRecord.getMinBufferSize(rate,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT);
+                    AUDIO_CHANNELS,
+                    AUDIO_ENCODING);
             if (bufferSize > 0) {
-                recorder = new AudioRecord(MediaRecorder.AudioSource.MIC,
-                        rate, AudioFormat.CHANNEL_IN_MONO, RECORDER_AUDIO_ENCODING, bufferSize);
+                audioRecorder = new AudioRecord(MediaRecorder.AudioSource.MIC,
+                        rate, AUDIO_CHANNELS, AUDIO_ENCODING, bufferSize);
 
-                int i = recorder.getState();
-                if (i == 1) {
-                    recorder.startRecording();
+                int i = audioRecorder.getState();
+                if (i == 1) { // 1 = Active, so if successful...
+                    audioRecorder.startRecording();
                     toast("Recording");
                     break;
                 }
             }
         }
-        isRecording = true;
+        isStartRecording = true;
         recordingThread = new Thread(new Runnable() {
 
             @Override
             public void run() {
-                writeAudioDataToFile();
+                writeAudioDataToTemporaryFile();
             }
         }, "AudioRecorder Thread");
         recordingThread.start();
-/*
-        isRecording = true;
-        // File path of recorded audio
-        String mFileName;
-        final String LOG_TAG = "AudioRecordTest";
-        // Verify that the device has a mic first
-        PackageManager pmanager = this.getPackageManager();
-        if (pmanager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)) {
-            // Set the file location for the audio
-
-            mFileName = Environment.getExternalStorageDirectory().getAbsolutePath();
-            mFileName += "/audiorecordtest.3gp";
-            // Create the recorder
-
-            mediaRecorder = new MediaRecorder();
-            // Set the audio format and encoder
-            mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-            mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
-
-            // Setup the output location
-            mediaRecorder.setOutputFile(mFileName);
-            // Start the recording
-            try {
-                mediaRecorder.prepare();
-                mediaRecorder.start();
-                toast("mediaRecorder started");
-            } catch (IOException e) {
-                toast("catchedd?");
-                e.printStackTrace();
-            }
-        } else { // no mic on device
-            Toast.makeText(this, "This device doesn't have a mic!", Toast.LENGTH_LONG).show();
-        }*/
     }
 
-    private void writeAudioDataToFile() {
+    private void writeAudioDataToTemporaryFile() {
         byte data[] = new byte[bufferSize];
-        String filename = getTempFilename();
+        String filepath = getTemporaryFilepath();
         FileOutputStream os = null;
 
          try {
-             os = new FileOutputStream(filename);
+             os = new FileOutputStream(filepath);
          } catch (FileNotFoundException e) {
              e.printStackTrace();
          }
 
          int read = 0;
         if (null != os) {
-            while (isRecording) {
-                read = recorder.read(data, 0, bufferSize);
+            while (isStartRecording) {
+                read = audioRecorder.read(data, 0, bufferSize);
 
                 if(AudioRecord.ERROR_INVALID_OPERATION != read) {
                     try {
@@ -191,44 +194,36 @@ public class RecordingActivity extends AppCompatActivity {
 
     private void stopRecording() {
 
-        if(null != recorder) {
-            isRecording = false;
+        if(null != audioRecorder) {
+            isStartRecording = false;
 
-            int i = recorder.getState();
+            int i = audioRecorder.getState();
             if(i==1)
-                recorder.stop();
-            recorder.release();
-            recorder = null;
+                audioRecorder.stop();
+            audioRecorder.release();
+            audioRecorder = null;
             recordingThread = null;
         }
 
-        copyWaveFile(getTempFilename(), getFilename());
-        deleteTempFile();
+        copyWavFile(getTemporaryFilepath(), getFilepath());
+        deleteTemporaryFile();
 
         isRecorded = true;
-/*
-        isRecorded = true;
-        isRecording = false;
-
-        mediaRecorder.stop();
-        mediaRecorder.reset();
-        mediaRecorder.release();
-*/
     }
 
-    private void deleteTempFile() {
-        File file = new File(getTempFilename());
+    private void deleteTemporaryFile() {
+        File file = new File(getTemporaryFilepath());
         file.delete();
     }
 
-    private void copyWaveFile(String inFilename, String outFilename) {
+    private void copyWavFile(String inFilename, String outFilename) {
         FileInputStream in = null;
         FileOutputStream out = null;
         long totalAudioLen = 0;
         long totalDataLen = totalAudioLen + 36;
-        long longSampleRate = RECORDER_SAMPLERATE;
+        long longSampleRate = AUDIO_SAMPLERATE;
         int channels = 2;
-        long byteRate = RECORDER_BPP * RECORDER_SAMPLERATE * channels/8;
+        long byteRate = AUDIO_BPP * AUDIO_SAMPLERATE * channels/8;
         byte[] data = new byte[bufferSize];
 
         try {
@@ -237,7 +232,7 @@ public class RecordingActivity extends AppCompatActivity {
             totalAudioLen = in.getChannel().size();
             totalDataLen = totalAudioLen + 36;
             AppLog.logString("File size: " + totalDataLen);
-            WriteWaveFileHeader(out, totalAudioLen, totalDataLen,
+            WriteWavFileHeader(out, totalAudioLen, totalDataLen,
                     longSampleRate, channels, byteRate);
             while(in.read(data) != -1) {
                 out.write(data);
@@ -252,59 +247,61 @@ public class RecordingActivity extends AppCompatActivity {
         }
     }
 
-    private void WriteWaveFileHeader(
-            FileOutputStream out, long totalAudioLen,
-            long totalDataLen, long longSampleRate, int channels,
+    // Note that this is the standard .wav file header format: http://soundfile.sapp.org/doc/WaveFormat/
+    // Some examples were used to complete this
+    private void WriteWavFileHeader(
+            FileOutputStream out, long audioLength,
+            long dataLength, long sampleRate, int channels,
             long byteRate) throws IOException{
 
-        byte[] header = new byte[44];
+        byte[] fileHeader = new byte[44];
 
-        header[0] = 'R'; // RIFF/WAVE header
-        header[1] = 'I';
-        header[2] = 'F';
-        header[3] = 'F';
-        header[4] = (byte) (totalDataLen & 0xff);
-        header[5] = (byte) ((totalDataLen >> 8) & 0xff);
-        header[6] = (byte) ((totalDataLen >> 16) & 0xff);
-        header[7] = (byte) ((totalDataLen >> 24) & 0xff);
-        header[8] = 'W';
-        header[9] = 'A';
-        header[10] = 'V';
-        header[11] = 'E';
-        header[12] = 'f'; // 'fmt ' chunk
-        header[13] = 'm';
-        header[14] = 't';
-        header[15] = ' ';
-        header[16] = 16; // 4 bytes: size of 'fmt ' chunk
-        header[17] = 0;
-        header[18] = 0;
-        header[19] = 0;
-        header[20] = 1; // format = 1
-        header[21] = 0;
-        header[22] = (byte) channels;
-        header[23] = 0;
-        header[24] = (byte) (totalDataLen & 0xff);
-        header[25] = (byte) ((totalDataLen >> 8) & 0xff);
-        header[26] = (byte) ((totalDataLen >> 16) & 0xff);
-        header[27] = (byte) ((totalDataLen >> 24) & 0xff);
-        header[28] = (byte) (totalDataLen & 0xff);
-        header[29] = (byte) ((totalDataLen >> 8) & 0xff);
-        header[30] = (byte) ((totalDataLen >> 16) & 0xff);
-        header[31] = (byte) ((totalDataLen >> 24) & 0xff);
-        header[32] = (byte) (2 * 16 / 8);
-        header[33] = 0;
-        header[34] = RECORDER_BPP;
-        header[35] = 0;
-        header[36] = 'd';
-        header[37] = 'a';
-        header[38] = 't';
-        header[39] = 'a';
-        header[40] = (byte) (totalDataLen & 0xff);
-        header[41] = (byte) ((totalDataLen >> 8) & 0xff);
-        header[42] = (byte) ((totalDataLen >> 16) & 0xff);
-        header[43] = (byte) ((totalDataLen >> 24) & 0xff);
+        fileHeader[0] = 'R'; // RIFF/WAVE header
+        fileHeader[1] = 'I';
+        fileHeader[2] = 'F';
+        fileHeader[3] = 'F';
+        fileHeader[4] = (byte) (dataLength & 0xff);
+        fileHeader[5] = (byte) ((dataLength >> 8) & 0xff);
+        fileHeader[6] = (byte) ((dataLength >> 16) & 0xff);
+        fileHeader[7] = (byte) ((dataLength >> 24) & 0xff);
+        fileHeader[8] = 'W';
+        fileHeader[9] = 'A';
+        fileHeader[10] = 'V';
+        fileHeader[11] = 'E';
+        fileHeader[12] = 'f'; // 'fmt ' chunk
+        fileHeader[13] = 'm';
+        fileHeader[14] = 't';
+        fileHeader[15] = ' ';
+        fileHeader[16] = 16; // 4 bytes: size of 'fmt ' chunk
+        fileHeader[17] = 0;
+        fileHeader[18] = 0;
+        fileHeader[19] = 0;
+        fileHeader[20] = 1; // format = 1
+        fileHeader[21] = 0;
+        fileHeader[22] = (byte) channels;
+        fileHeader[23] = 0;
+        fileHeader[24] = (byte) (sampleRate & 0xff);
+        fileHeader[25] = (byte) ((sampleRate >> 8) & 0xff);
+        fileHeader[26] = (byte) ((sampleRate >> 16) & 0xff);
+        fileHeader[27] = (byte) ((sampleRate >> 24) & 0xff);
+        fileHeader[28] = (byte) (byteRate & 0xff);
+        fileHeader[29] = (byte) ((byteRate >> 8) & 0xff);
+        fileHeader[30] = (byte) ((byteRate >> 16) & 0xff);
+        fileHeader[31] = (byte) ((byteRate >> 24) & 0xff);
+        fileHeader[32] = (byte) (2 * 16 / 8);
+        fileHeader[33] = 0;
+        fileHeader[34] = AUDIO_BPP;
+        fileHeader[35] = 0;
+        fileHeader[36] = 'd';
+        fileHeader[37] = 'a';
+        fileHeader[38] = 't';
+        fileHeader[39] = 'a';
+        fileHeader[40] = (byte) (audioLength & 0xff);
+        fileHeader[41] = (byte) ((audioLength >> 8) & 0xff);
+        fileHeader[42] = (byte) ((audioLength >> 16) & 0xff);
+        fileHeader[43] = (byte) ((audioLength >> 24) & 0xff);
 
-        out.write(header, 0, 44);
+        out.write(fileHeader, 0, 44);
     }
 
     private void startPlayback() {
@@ -312,18 +309,19 @@ public class RecordingActivity extends AppCompatActivity {
         playbackPlayer = new MediaPlayer();
         playbackPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
         try {
-            //File filePath = new File(lastFile);
-            //FileInputStream is = new FileInputStream(filePath);
-            playbackPlayer.setDataSource(lastFile);//getFilename());
-            //toast(lastFile);
-            //playbackPlayer.prepare();
-            //playbackPlayer.start();
-            //is.close();
+            playbackPlayer.setDataSource(lastFile);
+            toast("Playing");
+            playbackPlayer.prepare();
+            playbackPlayer.start();
         } catch (IOException e) {
             playbackPlayer.reset();
-            toast("Error");
+            toast("Error: IOException");
             e.printStackTrace();
 
+        } catch (IllegalArgumentException e) {
+            playbackPlayer.reset();
+            toast("Error: IllegalArgumentException");
+            e.printStackTrace();
         }
 
     }
@@ -331,6 +329,8 @@ public class RecordingActivity extends AppCompatActivity {
     private void stopPlayback() {
         if (playbackPlayer != null) {
             playbackPlayer.stop();
+            playbackPlayer.reset();
+            playbackPlayer = null;
         } else {
             toast("playbackPlayer=null");
         }
@@ -342,35 +342,32 @@ public class RecordingActivity extends AppCompatActivity {
         public void onClick(View v) {
             switch(v.getId()) {
                 case R.id.recording_button:{
-                    AppLog.logString("Start Recording");
-                    enableButtons(true, isRecorded);
+                    enableImageSwitcher(1);
+                    enableButtonsSwitcher(true);
                     startRecording();
-
                     break;
                 }
 
                 case R.id.stop_button:{
-                    AppLog.logString("Start Recording");
-
+                    enableImageSwitcher(0);
                     if (isPlayback)
                         stopPlayback();
                     else
                         stopRecording();
-
-                    enableButtons(false, isRecorded);
-
+                    enableButtonsSwitcher(false);
                     break;
                 }
 
                 case R.id.play_button:{
-                    AppLog.logString("Start Recording");
-                    enableButtons(true, isRecorded);
+                    enableImageSwitcher(2);
+                    enableButtonsSwitcher(true);
                     startPlayback();
                 }
             }
         }
     };
 
+    // Used for a quick way to make a toast
     private void toast(String text) {
         Toast toast = Toast.makeText(getApplicationContext(), text, Toast.LENGTH_SHORT);
         toast.show();
